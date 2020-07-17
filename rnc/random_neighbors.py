@@ -134,6 +134,8 @@ class RandomNeighbors:
 
     # TODO: KNN mapping
     # TODO: extend to brute force parameter tuning
+    # TODO: kernels for KNN, MeanShift, Spectral Clustring, Ward, OPTICS, Birch
+    # TODO: clustering methods: https://scikit-learn.org/stable/auto_examples/cluster/plot_cluster_comparison.html
     def fit_random_neighbors(self, x):
         """
         Recursively fit clustering algorithm using bootstrapped rows and columns for each fit.
