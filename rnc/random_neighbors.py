@@ -30,6 +30,8 @@ class RandomNeighbors:
         self.eps = eps
         self.min_samples = min_samples
 
+    # TODO: scale input matrix features method
+
     @staticmethod
     def sample_axis(axis_n, sample_iter, num_samples):
         """
@@ -64,8 +66,7 @@ class RandomNeighbors:
         list
         """
 
-        idx_samples = None
-
+        # TODO: find a better way to route than if blocks...
         # route for a custom list of axis sample sizes
         if self.use_custom_axis_samples:
 
@@ -84,7 +85,7 @@ class RandomNeighbors:
             idx_samples = custom_samples
 
         # sqrt selection of axis for all iterations - each set will have sqrt(axis_n) samples
-        if max_axis_selector == 'sqrt':
+        elif max_axis_selector == 'sqrt':
 
             sqrt_ = int(np.sqrt(axis_n))
 
@@ -95,7 +96,7 @@ class RandomNeighbors:
             )
 
         # log selection of axis for all iterations - each set will have log(axis_n) samples
-        if max_axis_selector == 'log2':
+        elif max_axis_selector == 'log2':
 
             log_ = int(np.log(axis_n))
 
@@ -106,7 +107,7 @@ class RandomNeighbors:
             )
 
         # percentile selection of axis for all iterations - each set will have .1*axis_n samples
-        if max_axis_selector == 'percentile':
+        elif max_axis_selector == 'percentile':
 
             percentile_ = int(axis_n * .1)
 
@@ -116,8 +117,9 @@ class RandomNeighbors:
                 num_samples=percentile_
             )
 
+        # TODO: give user flexibility for random route instead of hardcoded .2
         # random selection of axis - each set will have different size samples
-        if max_axis_selector == 'random':
+        elif max_axis_selector == 'random':
 
             # grab a set of random numbers sample iter items wide
             random_ = random.sample(range(int(axis_n * .2)), self.sample_iter)
@@ -125,27 +127,27 @@ class RandomNeighbors:
             # grab list of randomly sizes axis indexes
             idx_samples = [list(random.sample(range(axis_n), i)) for i in random_]
 
-        if idx_samples:
-            return idx_samples
-
         else:
             raise ValueError("Invalid parameters. Valid parameters are ['sqrt', 'log2', 'percentile', 'random']")
 
+        return idx_samples
+
+    # TODO: KNN mapping
+    # TODO: extend to brute force parameter tuning
     def fit_random_neighbors(self, x):
         """
-        Recusively fit clustering algorithm using bootstrapped rows and columns for each fit.
+        Recursively fit clustering algorithm using bootstrapped rows and columns for each fit.
         Output the best scores and a history objectRoute the sample_axis method through sample type options.
         If custom list provided, build a list of columns based on size provided in the list.
         If no custom list provided, use one of [sqrt, log2, percentile, random] to build list of sampled axis indexes
 
         Parameters
         ----------
-        axis_n : number of total rows or total columns in the dataset
-        max_axis_selector : metric to determine number of axis to sample
+        x : array of data [rows, cols] to cluster
 
         Returns
         -------
-        list
+        tuple
         """
 
         # define global storage to hold best parameters
