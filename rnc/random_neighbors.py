@@ -5,99 +5,39 @@ from sklearn.metrics import silhouette_score
 import random
 
 
-class RandomNeighbors(object):
+class RandomNeighbors:
     
     def __init__(
             self,
-            use_custom_feature_samples=False,
-            max_features='log2',
+            use_custom_axis_samples=False,
+            select_columns='log2',
+            select_rows='percentile',
             sample_iter=20,
             custom_feature_sample_list=None,
-            kernel='DBSCAN',
-            eps_list=None,
-            min_samples_list=None,
-            metric_list=None,
-            data=None
+            kernel='dbscan',
+            eps=None,
+            min_samples=None,
+            metric=None
     ):
 
-        self.use_custom_feature_samples = use_custom_feature_samples
+        self.use_custom_axis_samples = use_custom_axis_samples
         self.sample_iter = sample_iter
-        self.max_features = max_features
+        self.select_columns = select_columns
+        self.select_rows = select_rows
         self.custom_feature_sample_list = custom_feature_sample_list
         self.kernel = kernel
-        self.eps_list = eps_list
-        self.min_samples_list = min_samples_list
-        self.metric_list = metric_list
-        self.X = data
+        self.metric = metric
+        self.eps = eps
+        self.min_samples = min_samples
 
-    def brute_dbscan_search(self):
+    @staticmethod
+    def sample_axis(axis_n, sample_iter, num_samples):
         """
-        Brute grid search through various clustering methods that output a silhouette score.
-        Support DBSCAN, KNN, FAST-DBSCAN kernels.
+        Sample from range of (0, max_cols), num_samples without replacement, for each sample iteration
 
         Parameters
         ----------
-
-        Returns
-        -------
-        Object
-        """
-
-        best_sil = 0.0
-        best_eps = 0.0
-        best_ms = 0.0
-        best_metric = None
-
-        # search and fit clustering algorithm and show results
-        for i in self.eps_list:
-            for j in self.min_samples_list:
-                for k in self.metric_list:
-
-                    try:
-                        # cluster on predictions, features, and meta data flags
-                        cluster = DBSCAN(
-                            eps=i,
-                            min_samples=j,
-                            metric=k,
-                            algorithm='ball_tree'
-                        )
-
-                        # fit and check outputs
-                        cluster_fit = cluster.fit(self.X)
-                        labels = cluster_fit.labels_
-                        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-                        n_noise = list(labels).count(-1)
-                        sil_score = silhouette_score(self.X, labels)
-
-                        if sil_score > 0.0:
-                            print(f"eps {i}, ms {j}: clusters {n_clusters}, noise {n_noise}, dist {k}")
-                            print(f"{Counter(labels)}")
-                            print(f"Silhouette Coefficient: {sil_score} \n")
-
-                        if (sil_score > best_sil) & (n_clusters > 1.0):
-                            best_sil = sil_score
-                            best_eps = i
-                            best_ms = j
-                            best_metric = k
-
-                    except Exception as e:
-                        print(e)
-
-        return best_eps, best_ms, best_metric, best_sil
-
-    @staticmethod
-    def brute_knn_search():
-        # TODO: build the KNN search here
-        return None
-
-    @staticmethod
-    def sample_axis(max_axis, sample_iter, num_samples):
-        """
-        Sample from range of 0-max_cols, num_cols without replacement, for sample_n iterations
-
-        Parameters
-        ----------
-        max_axis : number of total rows or total columns in the dataset
+        axis_n : number of total rows or total columns in the dataset
         sample_iter: number of iterations to sampling from an axis
         num_samples: number of observations from axis to sample
 
@@ -106,32 +46,35 @@ class RandomNeighbors(object):
         list
         """
 
-        return [random.sample(range(max_axis), num_samples) for _ in sample_iter]
+        return [random.sample(range(axis_n), num_samples) for _ in range(sample_iter)]
 
-    def build_sample_index(self, total_features):
+    def build_sample_index(self, axis_n, max_axis_selector='log2'):
         """
-        Route the sample_columns method through num_cols options. If custom list provided, build a list of
-        columns based on size provided in the list. If no custom list provided, use the sqrt, log2, or
-        10th percentile of total columns to build list of columns to sample.
+        Route the sample_axis method through sample type options.
+        If custom list provided, build a list of columns based on size provided in the list.
+        If no custom list provided, use one of [sqrt, log2, percentile, random] to build list of sampled axis indexes
 
         Parameters
         ----------
+        axis_n : number of total rows or total columns in the dataset
+        max_axis_selector : metric to determine number of axis to sample
 
         Returns
         -------
         list
         """
 
-        max_cols = total_features
+        idx_samples = None
 
-        if self.use_custom_feature_samples:
+        # route for a custom list of axis sample sizes
+        if self.use_custom_axis_samples:
 
             custom_samples = []
 
             for i in self.custom_feature_sample_list:
 
                 idx_samples = self.sample_axis(
-                    max_axis=max_cols,
+                    axis_n=axis_n,
                     sample_iter=1,
                     num_samples=i
                 )
@@ -140,85 +83,122 @@ class RandomNeighbors(object):
 
             idx_samples = custom_samples
 
-        elif self.max_features == 'sqrt':
+        # sqrt selection of axis for all iterations - each set will have sqrt(axis_n) samples
+        if max_axis_selector == 'sqrt':
 
-            sqrt_ = int(np.sqrt(max_cols))
+            sqrt_ = int(np.sqrt(axis_n))
 
             idx_samples = self.sample_axis(
-                max_axis=max_cols,
+                axis_n=axis_n,
                 sample_iter=self.sample_iter,
                 num_samples=sqrt_
             )
 
-        elif self.max_features == 'log2':
+        # log selection of axis for all iterations - each set will have log(axis_n) samples
+        if max_axis_selector == 'log2':
 
-            log_ = int(np.log(max_cols))
+            log_ = int(np.log(axis_n))
 
             idx_samples = self.sample_axis(
-                max_axis=max_cols,
+                axis_n=axis_n,
                 sample_iter=self.sample_iter,
                 num_samples=log_
             )
 
-        else:
+        # percentile selection of axis for all iterations - each set will have .1*axis_n samples
+        if max_axis_selector == 'percentile':
 
-            percentile_ = int(max_cols * .1)
+            percentile_ = int(axis_n * .1)
 
             idx_samples = self.sample_axis(
-                max_axis=max_cols,
+                axis_n=axis_n,
                 sample_iter=self.sample_iter,
                 num_samples=percentile_
             )
 
-        return idx_samples
+        # random selection of axis - each set will have different size samples
+        if max_axis_selector == 'random':
 
-    def randomize_clusters(self, df, eps_list, min_samples_list, metric_list, col_samples):
+            # grab a set of random numbers sample iter items wide
+            random_ = random.sample(range(int(axis_n * .2)), self.sample_iter)
+
+            # grab list of randomly sizes axis indexes
+            idx_samples = [list(random.sample(range(axis_n), i)) for i in random_]
+
+        if idx_samples:
+            return idx_samples
+
+        else:
+            raise ValueError("Invalid parameters. Valid parameters are ['sqrt', 'log2', 'percentile', 'random']")
+
+    def fit_random_neighbors(self, x):
         """
-        Random forest style clustering
-        Uses sample of data frame columns and rows to find the best breakage
-        DBSCAN clustering kernel using brute cluster search
+        Recusively fit clustering algorithm using bootstrapped rows and columns for each fit.
+        Output the best scores and a history objectRoute the sample_axis method through sample type options.
+        If custom list provided, build a list of columns based on size provided in the list.
+        If no custom list provided, use one of [sqrt, log2, percentile, random] to build list of sampled axis indexes
+
         Parameters
         ----------
-        df : data frame to cluster
-        eps_list : radius of cluster parameter - list of values to search through
-        min_samples_list : number of samples needed to form cluster - list of values to search through
-        metric_list : list of distance metrics to search through
-        col_samples : random sample of df columns
+        axis_n : number of total rows or total columns in the dataset
+        max_axis_selector : metric to determine number of axis to sample
+
         Returns
         -------
-        multiple
+        list
         """
 
-        # define global storage for best breakage parameters
-        global_eps = None
-        global_ms = None
-        global_metric = None
-        global_sil = 0.0
-        global_col_samples = None
+        # define global storage to hold best parameters
+        best_sil = 0.0
+        best_sil_iter = 0.0
+        history_dict = {}
 
-        # TODO: initialize the sample rows and columns here
-        # TODO: initialize with sqrt, log2, and distribution based sampling of rows
-        # TODO: use the brute grid search or search through static parameters
-        # TODO: route the cluster kernel here: DBSCAN, KNN
+        # build the bootstrap of columns, rows
+        max_rows, max_cols = x.shape
+        row_samples = self.build_sample_index(axis_n=max_rows, max_axis_selector=self.select_rows)
+        col_samples = self.build_sample_index(axis_n=max_cols, max_axis_selector=self.select_columns)
+        bootstrap_list = [(row_samples[i], col_samples[i]) for i in range(max_rows)]
 
-        # loop through randomized columns
-        for c in col_samples:
+        if self.kernel == 'dbscan':
 
-            # sample rows for clustering
-            # row_sample = np.random.uniform(.3, .7, [1, 1])[0][0]
+            for i, v in enumerate(bootstrap_list):
 
-            # run clustering search
-            best_eps, best_ms, best_metric, best_sil = self.brute_dbscan_search()
+                boot_rows = np.array(v[0])
+                boot_cols = np.array(v[1])
 
-            # update metrics
-            if best_sil > global_sil:
-                global_sil = best_sil
-                global_eps = best_eps
-                global_ms = best_ms
-                global_metric = best_metric
-                global_col_samples = c
+                sampled_x = x[boot_rows[:, None], boot_cols]
 
-        print(f"best eps: {global_eps} best ms: {global_ms} best metric: {global_metric} best score{global_sil}")
-        print(global_col_samples)
+                # cluster on predictions, features, and meta data flags
+                cluster = DBSCAN(
+                    eps=self.eps,
+                    min_samples=self.min_samples,
+                    metric=self.metric,
+                    algorithm='ball_tree'
+                )
 
-        return global_col_samples, global_eps, global_ms, global_metric
+                # fit and check outputs
+                cluster_fit = cluster.fit(sampled_x)
+                labels = cluster_fit.labels_
+                n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+                n_noise = list(labels).count(-1)
+                sil_score = silhouette_score(sampled_x, labels)
+
+                if sil_score > 0.0:
+                    print(f"iteration {i}: n_clusters {n_clusters}, n_noise {n_noise}")
+                    print(f"{Counter(labels)}")
+                    print(f"silhouette coefficient: {sil_score} \n")
+
+                    history_dict['iteration_' + str(i)] = {
+                        'score': sil_score,
+                        'columns': boot_cols,
+                        'labels': labels,
+                        'n_clusters': n_clusters,
+                        'n_noise': n_noise,
+                        'fit_': cluster_fit
+                    }
+
+                    if (sil_score > best_sil) & (n_clusters > 1.0):
+                        best_sil = sil_score
+                        best_sil_iter = i
+
+                return best_sil, best_sil_iter, history_dict
