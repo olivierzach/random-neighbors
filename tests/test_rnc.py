@@ -3,6 +3,8 @@ import numpy as np
 
 rnc = RandomNeighbors()
 
+# TODO: explicit test suite for all rnc methods
+
 max_cols = 2000
 max_rows = 1000000
 col_samples = rnc.build_sample_index(axis_n=max_cols, max_axis_selector='log2')
