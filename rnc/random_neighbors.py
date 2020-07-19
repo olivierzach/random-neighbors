@@ -14,6 +14,9 @@ class RandomNeighbors:
             select_rows='percentile',
             sample_iter=20,
             custom_feature_sample_list=None,
+            random_axis_max_pct=.2,
+            normalize_data=False,
+            scale_data=False,
             kernel='dbscan',
             eps=None,
             min_samples=None,
@@ -25,12 +28,13 @@ class RandomNeighbors:
         self.select_columns = select_columns
         self.select_rows = select_rows
         self.custom_feature_sample_list = custom_feature_sample_list
+        self.random_axis_max_pct = random_axis_max_pct
         self.kernel = kernel
         self.metric = metric
         self.eps = eps
         self.min_samples = min_samples
-
-    # TODO: scale input matrix features method
+        self.normalize_data = normalize_data
+        self.scale_data = scale_data
 
     @staticmethod
     def sample_axis(axis_n, sample_iter, num_samples):
@@ -47,6 +51,13 @@ class RandomNeighbors:
         -------
         list
         """
+
+        assert isinstance(axis_n, int)
+        assert axis_n > 0
+        assert isinstance(sample_iter, int)
+        assert sample_iter > 0
+        assert isinstance(num_samples, int)
+        assert num_samples > 0
 
         return [random.sample(range(axis_n), num_samples) for _ in range(sample_iter)]
 
@@ -65,6 +76,12 @@ class RandomNeighbors:
         -------
         list
         """
+
+        assert isinstance(axis_n, int)
+        assert axis_n > 0
+        assert self.sample_iter > 0
+        assert isinstance(max_axis_selector, str)
+        assert isinstance(self.random_axis_max_pct, float)
 
         # TODO: find a better way to route than if blocks...
         # route for a custom list of axis sample sizes
@@ -117,12 +134,11 @@ class RandomNeighbors:
                 num_samples=percentile_
             )
 
-        # TODO: give user flexibility for random route instead of hardcoded .2
         # random selection of axis - each set will have different size samples
         elif max_axis_selector == 'random':
 
             # grab a set of random numbers sample iter items wide
-            random_ = random.sample(range(int(axis_n * .2)), self.sample_iter)
+            random_ = random.sample(range(int(axis_n * self.random_axis_max_pct)), self.sample_iter)
 
             # grab list of randomly sizes axis indexes
             idx_samples = [list(random.sample(range(axis_n), i)) for i in random_]
@@ -132,8 +148,51 @@ class RandomNeighbors:
 
         return idx_samples
 
-    # TODO: KNN mapping
-    # TODO: extend to brute force parameter tuning
+    @staticmethod
+    def normalize_input_data(x):
+        """
+        Normalize column axis by subtracting mean and dividing by standard deviation.
+
+        Parameters
+        ----------
+        x : array of data [rows, cols]
+
+        Returns
+        -------
+        array
+        """
+
+        mean = np.mean(x, axis=0)
+        std = np.std(x, axis=0)
+
+        x -= mean
+        x /= std
+
+        return x
+
+    @staticmethod
+    def scale_input_data(x):
+        """
+        Scale columns by subtracting column from column min and dividing by column max minus column min.
+        Standard min-max scaling.
+
+        Parameters
+        ----------
+        x : array of data [rows, cols]
+
+        Returns
+        -------
+        array
+        """
+        max_ = np.amax(x, axis=0)
+        min_ = np.amin(x, axis=0)
+        denominator = max_ - min_
+
+        x -= min_
+        x /= denominator
+
+        return x
+
     # TODO: kernels for KNN, MeanShift, Spectral Clustring, Ward, OPTICS, Birch
     # TODO: clustering methods: https://scikit-learn.org/stable/auto_examples/cluster/plot_cluster_comparison.html
     def fit_random_neighbors(self, x):
@@ -152,6 +211,19 @@ class RandomNeighbors:
         tuple
         """
 
+        assert isinstance(x, np.array)
+        assert x.shape[0] > 0
+        assert x.shape[1] > 0
+        assert isinstance(self.kernel, str)
+        assert isinstance(self.normalize_data, bool)
+        assert isinstance(self.scale_data, bool)
+
+        if self.normalize_data:
+            x = self.normalize_input_data(x)
+
+        if self.scale_data:
+            x = self.scale_input_data(x)
+
         # define global storage to hold best parameters
         best_sil = 0.0
         best_sil_iter = 0.0
@@ -159,11 +231,11 @@ class RandomNeighbors:
 
         # build the bootstrap of columns, rows
         max_rows, max_cols = x.shape
-        row_samples = self.build_sample_index(axis_n=max_rows, max_axis_selector=self.select_rows)
-        col_samples = self.build_sample_index(axis_n=max_cols, max_axis_selector=self.select_columns)
+        row_samples: list = self.build_sample_index(axis_n=max_rows, max_axis_selector=self.select_rows)
+        col_samples: list = self.build_sample_index(axis_n=max_cols, max_axis_selector=self.select_columns)
         bootstrap_list = [(row_samples[i], col_samples[i]) for i in range(max_rows)]
 
-        if self.kernel == 'dbscan':
+        if self.kernel.lower() == 'dbscan':
 
             for i, v in enumerate(bootstrap_list):
 
@@ -172,7 +244,7 @@ class RandomNeighbors:
 
                 sampled_x = x[boot_rows[:, None], boot_cols]
 
-                # cluster on predictions, features, and meta data flags
+                # cluster on bootstrapped data
                 cluster = DBSCAN(
                     eps=self.eps,
                     min_samples=self.min_samples,
