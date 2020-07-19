@@ -3,36 +3,45 @@ import numpy as np
 
 rnc = RandomNeighbors()
 
-# TODO: explicit test suite for all rnc methods
 
-max_cols = 2000
-max_rows = 1000000
-col_samples = rnc.build_sample_index(axis_n=max_cols, max_axis_selector='log2')
-print(col_samples)
-print(len(col_samples))
+def test_rnc_sample_axis(axis_n=1000, num_samples=35, sample_iter=20):
+    res = rnc.sample_axis(
+        axis_n=axis_n,
+        num_samples=num_samples,
+        sample_iter=sample_iter
+    )
 
-row_samples = rnc.build_sample_index(axis_n=max_rows, max_axis_selector='random')
-print(row_samples)
-print(len(row_samples))
+    assert isinstance(res, list)
+    assert len(res) == sample_iter
 
-for i in row_samples:
-    print(len(i))
+    for s in res:
+        assert len(s) == num_samples
+        assert np.max(s) <= axis_n
 
-len(row_samples[1])
-
-bootstrap_list = [(row_samples[i], col_samples[i]) for i in range(50)]
-len(bootstrap_list[0][0])
-
-for i in bootstrap_list:
-    print(i[0])
-    print(i[1])
+    return True
 
 
-a = np.random.rand(max_rows, max_cols)
-a.shape
-row_idx = np.array(row_samples[15])
-col_idx = np.array(col_samples[15])
+def test_rnc_build_sample_index(axis_n=1000, max_axis_selector='log2', sample_iter=20):
 
-sampled_a = a[row_idx[:, None], col_idx]
-print(sampled_a)
-print(sampled_a.shape)
+    res = rnc.build_sample_index(
+        axis_n=axis_n,
+        max_axis_selector=max_axis_selector
+    )
+
+    assert isinstance(res, list)
+    assert len(res) == sample_iter
+
+    for s in res:
+        if max_axis_selector == 'log2':
+            assert len(s) == int(np.log(axis_n))
+
+        if max_axis_selector == 'sqrt':
+            assert len(s) == int(np.sqrt(axis_n))
+
+        if max_axis_selector == 'percentile':
+            assert len(s) == int(axis_n * .1)
+
+        if max_axis_selector == 'random':
+            assert len(s) <= int(axis_n * .2)
+
+    return True
