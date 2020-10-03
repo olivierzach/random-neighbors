@@ -1,20 +1,20 @@
 # Random Neighbors
 
-Random Neighbors Clustering performs "random forest" style clustering on high-dimensional data. Provides sampling strategies
+`Random Neighbors Clustering` performs "random forest" style clustering on high-dimensional data. Provides sampling strategies
 to bootstrap input rows and columns. Method iteratively fits clustering models to the 
 samples and optimizes for the features that provide the best distinct cluster separation.
 
 
-## Algorithm
+## Implementation
 
-Implementation is straight-forward:
+`Random Neighbors` algorithm is straight-forward:
 - Bootstrap rows and columns based on inputted sampling strategy for a predefined set of iterations
 - For each iteration on the sampled data, fit a clustering model and extract performance metrics
 - Output the features that provide the most distinct clusters across all iterations
 
 Like a random forest iteratively builds decision trees on bootstrapped data, random neighbors
-iteratively builds clusters on bootstrapped data. Random Neighbors iterations can be used to extract the
-single set of columns that provide largest cluster separation, or features can be averaged across iterations in a 
+iteratively builds clustering models on bootstrapped data. Random Neighbors iterations can be used to extract the
+single set of randomly selected columns that provide largest cluster separation, or features can be averaged across iterations in a 
 psuedo-feature importance metric. Dropout can be optionally applied to the history of iterations to avoid bias in 
 the sampled fitting procedure. 
 
@@ -25,7 +25,7 @@ Main benefits include:
 - Iterations search for a low-dimensional representation of the data that produces distinct clusters
 - Random sampling guards against correlation in input features, which can skew clustering results
 
-## Case Study: Clustering Product Usage
+## Case Study: Clustering Product Usage Data
 
 Product logs contain a wealth of information on every action with a business application. Naturally,
 business would like to segment users based on this activity in order to drive product strategy including pricing, new features,
@@ -42,7 +42,7 @@ product clustering that was not possible applying model to entire feature-set.
 
 Details of the implementation: 
 - `DBSCAN` kernel, the "decision tree" of `RandomNeighbors`
-- 50 total model iterations
+- 50 total model iterations in our neighborhood
 - Column sampling of at most `log2(features)` for each iteration
 - Row sampling of `sqrt(rows)` for each iteration
 - Extract `silhouette score` from each iteration, keep only iterations with positive score and at least two clusters
