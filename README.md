@@ -36,10 +36,18 @@ input data grows with the total numbers of actions possible in the app and the t
 of users. The size and dimension of this data makes fitting clustering methods on the entire dataset challenging. 
 Fitting on all rows is time-consuming, and a large amount of columns, possibly correlated, can build disoriented results. 
 
- 
+Product data like this drove the development of `RandomNeighbors`. Fitting this method produced a 5-feature, 5-cluster
+representation of the entire dataset based on a strong `silhouette score`. Resulting representation enabled real-time 
+product clustering that was not possible applying model to entire feature-set. 
 
-
-## Project Roadmap
+Details of the implementation: 
+- `DBSCAN` kernel, the "decision tree" of `RandomNeighbors`
+- 50 total model iterations
+- Column sampling of at most `log2(features)` for each iteration
+- Row sampling of `sqrt(rows)` for each iteration
+- Extract `silhouette score` from each iteration, keep only iterations with positive score and at least two clusters
+- Keep history of columns that provided the best score
+- Re-fit model on the full dataset using the best features selected from the method
 
 ## Installation
 
@@ -52,12 +60,60 @@ pip install foobar
 ## Usage
 
 ```python
-import foobar
+from rnc.random_neighbors import RandomNeighbors
+from sklearn.cluster import DBSCAN
+import numpy as np
 
-foobar.pluralize('word') # returns 'words'
-foobar.pluralize('goose') # returns 'geese'
-foobar.singularize('phenomena') # returns 'phenomenon'
+# high dimensional data
+data = np.random.rand(100000, 10000)
+
+# use vanilla DBSCAN as random neighbors kernel
+# any sklearn.cluster method that uses sklearn.metrics `silhouette_score` is supported
+cluster = DBSCAN()
+
+# initialize with bootstrap strategy
+rnc = RandomNeighbors(
+    select_columns='sqrt',
+    select_rows='log2',
+    sample_iter=200,
+    normalize_data=True,
+    scale_data=True
+)
+
+# fit method to our data
+best_metric, best_iter, fit_history = rnc.fit_random_neighbors(x=data, cluster=cluster)
+
+# see results
+print(best_metric, best_iter)
+
+# history shows scores and bootstrap indices by iteration
+scores = [(k, v['score']) for (k, v) in fit_history.items()]
+print(scores)
 ```
+
+## Method Documentation
+
+Available methods for `fit_random_neighbors()`:
+- `use_custom_axis_samples`: supply your own index samples for columns and rows
+- `select_columns`: sample policy for columns (`sqrt`, `log2`, `percentile`, `random`)
+- `select_rows`: sample policy for rows (`sqrt`, `log2`, `percentile`, `random`)
+- `sample_iter`: number of model fit iterations
+- `custom_feature_sample_list`: list of custom sample indices
+- `random_axis_max_pct`: threshold for percentile sampling strategy
+- `normalize_data`: normalize input data
+- `scale_data`: min-max scale input data
+
+Method Returns:
+- `best_metric`: best overall `silhouette score` across all iterations
+- `best_iter`: iteration that provided the best overall score
+- `history_dict`: dictionary of rows, columns, score, labels, and fit object by model iteration
+
+## Roadmap
+
+- Psuedo-Feature Importance Metrics
+- Expanded Testing
+- History dropout 
+- Data Examples
 
 ## Contributing
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
