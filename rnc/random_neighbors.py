@@ -3,6 +3,10 @@ from collections import Counter
 from sklearn.metrics import silhouette_score
 import random
 
+# TODO: implement this as a true python object
+# TODO: tests
+# TODO: figure out best way to handle routing in build_sample_index instead of if blocks
+
 
 class RandomNeighbors:
     
@@ -26,6 +30,19 @@ class RandomNeighbors:
         self.random_axis_max_pct = random_axis_max_pct
         self.normalize_data = normalize_data
         self.scale_data = scale_data
+
+    def __repr__(self):
+        name_ = f'''RandomNeighbors({self.use_custom_axis_samples},{self.sample_iter}, {self.select_columns},
+                {self.select_rows}, {self.custom_feature_sample_list}, {self.random_axis_max_pct}
+                {self.normalize_data}, {self.scale_data})
+                '''
+        return name_
+
+    def __str__(self):
+        return str(tuple(self))
+
+    def __eq__(self, other):
+        return tuple(self) == tuple(other)
 
     @staticmethod
     def sample_axis(axis_n, sample_iter, num_samples):
@@ -74,7 +91,6 @@ class RandomNeighbors:
         assert isinstance(max_axis_selector, str)
         assert isinstance(self.random_axis_max_pct, float)
 
-        # TODO: find a better way to route than if blocks...
         # route for a custom list of axis sample sizes
         if self.use_custom_axis_samples:
 
