@@ -1,6 +1,5 @@
 import numpy as np
 from collections import Counter
-from sklearn.cluster import DBSCAN
 from sklearn.metrics import silhouette_score
 import random
 
@@ -15,12 +14,8 @@ class RandomNeighbors:
             sample_iter=20,
             custom_feature_sample_list=None,
             random_axis_max_pct=.2,
-            normalize_data=False,
-            scale_data=False,
-            kernel='dbscan',
-            eps=None,
-            min_samples=None,
-            metric=None
+            normalize_data=True,
+            scale_data=True
     ):
 
         self.use_custom_axis_samples = use_custom_axis_samples
@@ -29,10 +24,6 @@ class RandomNeighbors:
         self.select_rows = select_rows
         self.custom_feature_sample_list = custom_feature_sample_list
         self.random_axis_max_pct = random_axis_max_pct
-        self.kernel = kernel
-        self.metric = metric
-        self.eps = eps
-        self.min_samples = min_samples
         self.normalize_data = normalize_data
         self.scale_data = scale_data
 
@@ -193,9 +184,7 @@ class RandomNeighbors:
 
         return x
 
-    # TODO: kernels for KNN, MeanShift, Spectral Clustring, Ward, OPTICS, Birch
-    # TODO: clustering methods: https://scikit-learn.org/stable/auto_examples/cluster/plot_cluster_comparison.html
-    def fit_random_neighbors(self, x):
+    def fit_random_neighbors(self, x, cluster=None):
         """
         Recursively fit clustering algorithm using bootstrapped rows and columns for each fit.
         Output the best scores and a history objectRoute the sample_axis method through sample type options.
@@ -205,16 +194,16 @@ class RandomNeighbors:
         Parameters
         ----------
         x : array of data [rows, cols] to cluster
+        cluster: sci-kit learn cluster object
 
         Returns
         -------
         tuple
         """
 
-        assert isinstance(x, np.array)
+        assert isinstance(x, (np.ndarray, np.generic))
         assert x.shape[0] > 0
         assert x.shape[1] > 0
-        assert isinstance(self.kernel, str)
         assert isinstance(self.normalize_data, bool)
         assert isinstance(self.scale_data, bool)
 
@@ -225,38 +214,40 @@ class RandomNeighbors:
             x = self.scale_input_data(x)
 
         # define global storage to hold best parameters
-        best_sil = 0.0
-        best_sil_iter = 0.0
+        best_metric = 0.0
+        best_metric_iter = 0.0
         history_dict = {}
 
         # build the bootstrap of columns, rows
         max_rows, max_cols = x.shape
         row_samples: list = self.build_sample_index(axis_n=max_rows, max_axis_selector=self.select_rows)
         col_samples: list = self.build_sample_index(axis_n=max_cols, max_axis_selector=self.select_columns)
-        bootstrap_list = [(row_samples[i], col_samples[i]) for i in range(max_rows)]
+        bootstrap_list = [(row_samples[i], col_samples[i]) for i in range(self.sample_iter)]
 
-        if self.kernel.lower() == 'dbscan':
+        for i, v in enumerate(bootstrap_list):
 
-            for i, v in enumerate(bootstrap_list):
+            boot_rows = np.array(v[0])
+            boot_cols = np.array(v[1])
+            sampled_x = x[boot_rows[:, None], boot_cols]
 
-                boot_rows = np.array(v[0])
-                boot_cols = np.array(v[1])
+            # fit and check outputs
+            cluster_fit = cluster.fit(sampled_x)
+            labels = cluster_fit.labels_
+            n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+            n_noise = list(labels).count(-1)
 
-                sampled_x = x[boot_rows[:, None], boot_cols]
+            if len(set(labels)) == 1:
+                print(f'No Label Differentiation - skipping iteration {i}')
+                history_dict['iteration_' + str(i)] = {
+                    'score': None,
+                    'columns': boot_cols,
+                    'labels': labels,
+                    'n_clusters': n_clusters,
+                    'n_noise': n_noise,
+                    'fit_': cluster_fit
+                }
 
-                # cluster on bootstrapped data
-                cluster = DBSCAN(
-                    eps=self.eps,
-                    min_samples=self.min_samples,
-                    metric=self.metric,
-                    algorithm='ball_tree'
-                )
-
-                # fit and check outputs
-                cluster_fit = cluster.fit(sampled_x)
-                labels = cluster_fit.labels_
-                n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-                n_noise = list(labels).count(-1)
+            else:
                 sil_score = silhouette_score(sampled_x, labels)
 
                 if sil_score > 0.0:
@@ -273,8 +264,8 @@ class RandomNeighbors:
                         'fit_': cluster_fit
                     }
 
-                    if (sil_score > best_sil) & (n_clusters > 1.0):
-                        best_sil = sil_score
-                        best_sil_iter = i
+                    if (sil_score > best_metric) & (n_clusters > 1.0):
+                        best_metric = sil_score
+                        best_metric_iter = i
 
-                return best_sil, best_sil_iter, history_dict
+        return best_metric, best_metric_iter, history_dict
