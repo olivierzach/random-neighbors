@@ -49,14 +49,6 @@ Details of the implementation:
 - Keep history of columns that provided the best score
 - Re-fit model on the full dataset using the best features selected from the method
 
-## Installation
-
-Use the package manager [pip](https://pip.pypa.io/en/stable/) to install foobar.
-
-```bash
-pip install foobar
-```
-
 ## Usage
 
 ```python
