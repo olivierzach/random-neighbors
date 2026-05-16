@@ -24,4 +24,10 @@ python -m experiments.run_iris
 python -m experiments.run_urf_landmarks
 ```
 
+## Benchmarks (artifacts + plots)
+```bash
+python -m experiments.run_benchmarks
+# outputs under artifacts/benchmarks/<run_id>/
+```
+
 These scripts print best feature subset scores and produce small plots (if matplotlib is installed).
