@@ -1,287 +1,212 @@
-import numpy as np
-from collections import Counter
-from sklearn.metrics import silhouette_score
-import random
+from __future__ import annotations
 
-# TODO: implement this as a true python object
-# TODO: tests
-# TODO: figure out best way to handle routing in build_sample_index instead of if blocks
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+from sklearn.metrics import silhouette_score
+
+
+ScoreFn = Callable[[np.ndarray, np.ndarray], float]
+
+
+@dataclass
+class FitResult:
+    best_score: float
+    best_iter: int
+    best_features: List[int]
+    history: Dict[str, Dict[str, Any]]
 
 
 class RandomNeighbors:
-    
-    def __init__(
-            self,
-            use_custom_axis_samples=False,
-            select_columns='log2',
-            select_rows='percentile',
-            sample_iter=20,
-            custom_feature_sample_list=None,
-            random_axis_max_pct=.2,
-            normalize_data=True,
-            scale_data=True
-    ):
+    """Random-forest-style feature bagging for clustering.
 
+    Compared to the original version in this repo, this implementation:
+    - adds `random_state` for reproducibility
+    - fixes log sampling to use log2
+    - makes normalization/scaling robust to zero-variance columns
+    - supports a pluggable scoring function
+    - exposes a simple feature-importance summary
+
+    The scoring step is what defines "good" clusters; silhouette is default.
+    """
+
+    def __init__(
+        self,
+        *,
+        use_custom_axis_samples: bool = False,
+        select_columns: str = "log2",
+        select_rows: str = "percentile",
+        sample_iter: int = 20,
+        custom_feature_sample_list: Optional[Sequence[int]] = None,
+        random_axis_max_pct: float = 0.2,
+        normalize_data: bool = True,
+        scale_data: bool = True,
+        random_state: Optional[int] = None,
+        verbose: bool = False,
+        score_fn: Optional[ScoreFn] = None,
+    ):
         self.use_custom_axis_samples = use_custom_axis_samples
-        self.sample_iter = sample_iter
+        self.sample_iter = int(sample_iter)
         self.select_columns = select_columns
         self.select_rows = select_rows
-        self.custom_feature_sample_list = custom_feature_sample_list
-        self.random_axis_max_pct = random_axis_max_pct
-        self.normalize_data = normalize_data
-        self.scale_data = scale_data
+        self.custom_feature_sample_list = list(custom_feature_sample_list) if custom_feature_sample_list else None
+        self.random_axis_max_pct = float(random_axis_max_pct)
+        self.normalize_data = bool(normalize_data)
+        self.scale_data = bool(scale_data)
+        self.random_state = random_state
+        self.verbose = verbose
+        self.score_fn = score_fn or (lambda Xs, labels: float(silhouette_score(Xs, labels)))
 
-    def __repr__(self):
-        name_ = f'''RandomNeighbors({self.use_custom_axis_samples},{self.sample_iter}, {self.select_columns},
-                {self.select_rows}, {self.custom_feature_sample_list}, {self.random_axis_max_pct}
-                {self.normalize_data}, {self.scale_data})
-                '''
-        return name_
+        self._rng = np.random.default_rng(random_state)
+        self._last_result: Optional[FitResult] = None
 
-    def __str__(self):
-        return str(tuple(self))
-
-    def __eq__(self, other):
-        return tuple(self) == tuple(other)
+    def __repr__(self) -> str:
+        return (
+            "RandomNeighbors(" 
+            f"sample_iter={self.sample_iter}, select_columns={self.select_columns}, select_rows={self.select_rows}, "
+            f"normalize={self.normalize_data}, scale={self.scale_data}, random_state={self.random_state})"
+        )
 
     @staticmethod
-    def sample_axis(axis_n, sample_iter, num_samples):
-        """
-        Sample from range of (0, max_cols), num_samples without replacement, for each sample iteration
+    def _safe_normalize(X: np.ndarray) -> np.ndarray:
+        mean = X.mean(axis=0)
+        std = X.std(axis=0)
+        std = np.where(std == 0, 1.0, std)
+        return (X - mean) / std
 
-        Parameters
-        ----------
-        axis_n : number of total rows or total columns in the dataset
-        sample_iter: number of iterations to sampling from an axis
-        num_samples: number of observations from axis to sample
+    @staticmethod
+    def _safe_minmax_scale(X: np.ndarray) -> np.ndarray:
+        mn = X.min(axis=0)
+        mx = X.max(axis=0)
+        denom = mx - mn
+        denom = np.where(denom == 0, 1.0, denom)
+        return (X - mn) / denom
 
-        Returns
-        -------
-        list
-        """
+    def _sample_axis(self, axis_n: int, num_samples: int) -> List[List[int]]:
+        if not (isinstance(axis_n, int) and axis_n > 0):
+            raise ValueError("axis_n must be positive int")
+        if not (isinstance(num_samples, int) and 0 < num_samples <= axis_n):
+            raise ValueError("num_samples must be in [1, axis_n]")
+        return [self._rng.choice(axis_n, size=num_samples, replace=False).tolist() for _ in range(self.sample_iter)]
 
-        assert isinstance(axis_n, int)
-        assert axis_n > 0
-        assert isinstance(sample_iter, int)
-        assert sample_iter > 0
-        assert isinstance(num_samples, int)
-        assert num_samples > 0
+    def build_sample_index(self, axis_n: int, max_axis_selector: str) -> List[List[int]]:
+        if self.sample_iter <= 0:
+            raise ValueError("sample_iter must be > 0")
 
-        return [random.sample(range(axis_n), num_samples) for _ in range(sample_iter)]
-
-    def build_sample_index(self, axis_n, max_axis_selector='log2'):
-        """
-        Route the sample_axis method through sample type options.
-        If custom list provided, build a list of columns based on size provided in the list.
-        If no custom list provided, use one of [sqrt, log2, percentile, random] to build list of sampled axis indexes
-
-        Parameters
-        ----------
-        axis_n : number of total rows or total columns in the dataset
-        max_axis_selector : metric to determine number of axis to sample
-
-        Returns
-        -------
-        list
-        """
-
-        assert isinstance(axis_n, int)
-        assert axis_n > 0
-        assert self.sample_iter > 0
-        assert isinstance(max_axis_selector, str)
-        assert isinstance(self.random_axis_max_pct, float)
-
-        # route for a custom list of axis sample sizes
         if self.use_custom_axis_samples:
+            if not self.custom_feature_sample_list:
+                raise ValueError("custom_feature_sample_list must be provided when use_custom_axis_samples=True")
+            out: List[List[int]] = []
+            for k in self.custom_feature_sample_list:
+                out.extend(self._sample_axis(axis_n, int(k)))
+            return out[: self.sample_iter]
 
-            custom_samples = []
+        if max_axis_selector == "sqrt":
+            k = max(1, int(np.sqrt(axis_n)))
+            return self._sample_axis(axis_n, k)
 
-            for i in self.custom_feature_sample_list:
+        if max_axis_selector == "log2":
+            k = max(1, int(np.log2(axis_n)))
+            return self._sample_axis(axis_n, k)
 
-                idx_samples = self.sample_axis(
-                    axis_n=axis_n,
-                    sample_iter=1,
-                    num_samples=i
-                )
+        if max_axis_selector == "percentile":
+            k = max(1, int(axis_n * 0.1))
+            return self._sample_axis(axis_n, k)
 
-                custom_samples.append(idx_samples)
+        if max_axis_selector == "random":
+            max_k = max(1, int(axis_n * self.random_axis_max_pct))
+            sizes = self._rng.integers(low=1, high=max_k + 1, size=self.sample_iter)
+            return [self._rng.choice(axis_n, size=int(k), replace=False).tolist() for k in sizes]
 
-            idx_samples = custom_samples
+        raise ValueError("Invalid selector. Use one of: sqrt, log2, percentile, random")
 
-        # sqrt selection of axis for all iterations - each set will have sqrt(axis_n) samples
-        elif max_axis_selector == 'sqrt':
+    def fit(self, X: np.ndarray, *, clusterer: Any) -> FitResult:
+        X = np.asarray(X)
+        if X.ndim != 2:
+            raise ValueError("X must be 2D")
+        if X.shape[0] <= 1 or X.shape[1] <= 1:
+            raise ValueError("X must have at least 2 rows and 2 cols")
 
-            sqrt_ = int(np.sqrt(axis_n))
-
-            idx_samples = self.sample_axis(
-                axis_n=axis_n,
-                sample_iter=self.sample_iter,
-                num_samples=sqrt_
-            )
-
-        # log selection of axis for all iterations - each set will have log(axis_n) samples
-        elif max_axis_selector == 'log2':
-
-            log_ = int(np.log(axis_n))
-
-            idx_samples = self.sample_axis(
-                axis_n=axis_n,
-                sample_iter=self.sample_iter,
-                num_samples=log_
-            )
-
-        # percentile selection of axis for all iterations - each set will have .1*axis_n samples
-        elif max_axis_selector == 'percentile':
-
-            percentile_ = int(axis_n * .1)
-
-            idx_samples = self.sample_axis(
-                axis_n=axis_n,
-                sample_iter=self.sample_iter,
-                num_samples=percentile_
-            )
-
-        # random selection of axis - each set will have different size samples
-        elif max_axis_selector == 'random':
-
-            # grab a set of random numbers sample iter items wide
-            random_ = random.sample(range(int(axis_n * self.random_axis_max_pct)), self.sample_iter)
-
-            # grab list of randomly sizes axis indexes
-            idx_samples = [list(random.sample(range(axis_n), i)) for i in random_]
-
-        else:
-            raise ValueError("Invalid parameters. Valid parameters are ['sqrt', 'log2', 'percentile', 'random']")
-
-        return idx_samples
-
-    @staticmethod
-    def normalize_input_data(x):
-        """
-        Normalize column axis by subtracting mean and dividing by standard deviation.
-
-        Parameters
-        ----------
-        x : array of data [rows, cols]
-
-        Returns
-        -------
-        array
-        """
-
-        mean = np.mean(x, axis=0)
-        std = np.std(x, axis=0)
-
-        x -= mean
-        x /= std
-
-        return x
-
-    @staticmethod
-    def scale_input_data(x):
-        """
-        Scale columns by subtracting column from column min and dividing by column max minus column min.
-        Standard min-max scaling.
-
-        Parameters
-        ----------
-        x : array of data [rows, cols]
-
-        Returns
-        -------
-        array
-        """
-        max_ = np.amax(x, axis=0)
-        min_ = np.amin(x, axis=0)
-        denominator = max_ - min_
-
-        x -= min_
-        x /= denominator
-
-        return x
-
-    def fit_random_neighbors(self, x, cluster=None):
-        """
-        Recursively fit clustering algorithm using bootstrapped rows and columns for each fit.
-        Output the best scores and a history objectRoute the sample_axis method through sample type options.
-        If custom list provided, build a list of columns based on size provided in the list.
-        If no custom list provided, use one of [sqrt, log2, percentile, random] to build list of sampled axis indexes
-
-        Parameters
-        ----------
-        x : array of data [rows, cols] to cluster
-        cluster: sci-kit learn cluster object
-
-        Returns
-        -------
-        tuple
-        """
-
-        assert isinstance(x, (np.ndarray, np.generic))
-        assert x.shape[0] > 0
-        assert x.shape[1] > 0
-        assert isinstance(self.normalize_data, bool)
-        assert isinstance(self.scale_data, bool)
-
+        Xp = X
         if self.normalize_data:
-            x = self.normalize_input_data(x)
-
+            Xp = self._safe_normalize(Xp)
         if self.scale_data:
-            x = self.scale_input_data(x)
+            Xp = self._safe_minmax_scale(Xp)
 
-        # define global storage to hold best parameters
-        best_metric = 0.0
-        best_metric_iter = 0.0
-        history_dict = {}
+        n_rows, n_cols = Xp.shape
+        row_samples = self.build_sample_index(n_rows, self.select_rows)
+        col_samples = self.build_sample_index(n_cols, self.select_columns)
 
-        # build the bootstrap of columns, rows
-        max_rows, max_cols = x.shape
-        row_samples: list = self.build_sample_index(axis_n=max_rows, max_axis_selector=self.select_rows)
-        col_samples: list = self.build_sample_index(axis_n=max_cols, max_axis_selector=self.select_columns)
-        bootstrap_list = [(row_samples[i], col_samples[i]) for i in range(self.sample_iter)]
+        best_score = -np.inf
+        best_iter = -1
+        best_cols: List[int] = []
+        history: Dict[str, Dict[str, Any]] = {}
 
-        for i, v in enumerate(bootstrap_list):
+        for i in range(self.sample_iter):
+            rows = np.asarray(row_samples[i], dtype=int)
+            cols = np.asarray(col_samples[i], dtype=int)
+            Xs = Xp[rows[:, None], cols]
 
-            boot_rows = np.array(v[0])
-            boot_cols = np.array(v[1])
-            sampled_x = x[boot_rows[:, None], boot_cols]
+            fit = clusterer.fit(Xs)
+            labels = np.asarray(fit.labels_)
 
-            # fit and check outputs
-            cluster_fit = cluster.fit(sampled_x)
-            labels = cluster_fit.labels_
-            n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-            n_noise = list(labels).count(-1)
+            # Reject degenerate clusterings
+            uniq = set(labels.tolist())
+            n_clusters = len(uniq) - (1 if -1 in uniq else 0)
+            n_noise = int((labels == -1).sum())
 
-            if len(set(labels)) == 1:
-                print(f'No Label Differentiation - skipping iteration {i}')
-                history_dict['iteration_' + str(i)] = {
-                    'score': None,
-                    'columns': boot_cols,
-                    'labels': labels,
-                    'n_clusters': n_clusters,
-                    'n_noise': n_noise,
-                    'fit_': cluster_fit
-                }
+            rec: Dict[str, Any] = {
+                "columns": cols.tolist(),
+                "n_clusters": n_clusters,
+                "n_noise": n_noise,
+                "labels": labels,
+                "score": None,
+            }
 
-            else:
-                sil_score = silhouette_score(sampled_x, labels)
+            if len(uniq) <= 1 or n_clusters < 2:
+                history[f"iteration_{i}"] = rec
+                continue
 
-                if sil_score > 0.0:
-                    print(f"iteration {i}: n_clusters {n_clusters}, n_noise {n_noise}")
-                    print(f"{Counter(labels)}")
-                    print(f"silhouette coefficient: {sil_score} \n")
+            try:
+                score = float(self.score_fn(Xs, labels))
+            except Exception:
+                history[f"iteration_{i}"] = rec
+                continue
 
-                    history_dict['iteration_' + str(i)] = {
-                        'score': sil_score,
-                        'columns': boot_cols,
-                        'labels': labels,
-                        'n_clusters': n_clusters,
-                        'n_noise': n_noise,
-                        'fit_': cluster_fit
-                    }
+            rec["score"] = score
+            history[f"iteration_{i}"] = rec
 
-                    if (sil_score > best_metric) & (n_clusters > 1.0):
-                        best_metric = sil_score
-                        best_metric_iter = i
+            if self.verbose:
+                print(f"iter {i}: score={score:.4f} n_clusters={n_clusters} n_noise={n_noise} n_features={len(cols)}")
 
-        return best_metric, best_metric_iter, history_dict
+            if score > best_score:
+                best_score = score
+                best_iter = i
+                best_cols = cols.tolist()
+
+        res = FitResult(best_score=float(best_score), best_iter=int(best_iter), best_features=best_cols, history=history)
+        self._last_result = res
+        return res
+
+    def feature_importance(self, *, top_k: int = 25) -> List[Tuple[int, float]]:
+        """Score-weighted feature frequency from the last fit.
+
+        Not a principled importance metric; a quick heuristic to see which features
+        show up in high-scoring iterations.
+        """
+        if self._last_result is None:
+            raise RuntimeError("call fit() first")
+
+        scores: Dict[int, float] = {}
+        for rec in self._last_result.history.values():
+            s = rec.get("score")
+            cols = rec.get("columns")
+            if s is None or not cols:
+                continue
+            w = max(0.0, float(s))
+            for j in cols:
+                scores[j] = scores.get(j, 0.0) + w
+
+        items = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        return items[: int(top_k)]

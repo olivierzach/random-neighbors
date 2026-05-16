@@ -1,47 +1,26 @@
-from rnc.random_neighbors import RandomNeighbors
 import numpy as np
 
-rnc = RandomNeighbors()
+from rnc.random_neighbors import RandomNeighbors
 
 
-def test_rnc_sample_axis(axis_n=1000, num_samples=35, sample_iter=20):
-    res = rnc.sample_axis(
-        axis_n=axis_n,
-        num_samples=num_samples,
-        sample_iter=sample_iter
-    )
+def test_build_sample_index_shapes(axis_n=1000, sample_iter=20):
+    rn = RandomNeighbors(sample_iter=sample_iter, random_state=0)
 
-    assert isinstance(res, list)
-    assert len(res) == sample_iter
+    for selector in ["log2", "sqrt", "percentile", "random"]:
+        res = rn.build_sample_index(axis_n=axis_n, max_axis_selector=selector)
+        assert isinstance(res, list)
+        assert len(res) == sample_iter
 
-    for s in res:
-        assert len(s) == num_samples
-        assert np.max(s) <= axis_n
+        for s in res:
+            assert isinstance(s, list)
+            assert 1 <= len(s) <= axis_n
+            assert np.max(s) < axis_n
 
-    return True
-
-
-def test_rnc_build_sample_index(axis_n=1000, max_axis_selector='log2', sample_iter=20):
-
-    res = rnc.build_sample_index(
-        axis_n=axis_n,
-        max_axis_selector=max_axis_selector
-    )
-
-    assert isinstance(res, list)
-    assert len(res) == sample_iter
-
-    for s in res:
-        if max_axis_selector == 'log2':
-            assert len(s) == int(np.log(axis_n))
-
-        if max_axis_selector == 'sqrt':
-            assert len(s) == int(np.sqrt(axis_n))
-
-        if max_axis_selector == 'percentile':
-            assert len(s) == int(axis_n * .1)
-
-        if max_axis_selector == 'random':
-            assert len(s) <= int(axis_n * .2)
-
-    return True
+            if selector == "log2":
+                assert len(s) == max(1, int(np.log2(axis_n)))
+            if selector == "sqrt":
+                assert len(s) == max(1, int(np.sqrt(axis_n)))
+            if selector == "percentile":
+                assert len(s) == max(1, int(axis_n * 0.1))
+            if selector == "random":
+                assert len(s) <= max(1, int(axis_n * 0.2))
