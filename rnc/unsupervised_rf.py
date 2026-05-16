@@ -107,6 +107,73 @@ class UnsupervisedRFProximity:
     def fit_transform(self, X: np.ndarray) -> np.ndarray:
         return self.fit(X).transform(X)
 
+    def transform_landmarks(
+        self,
+        X: np.ndarray,
+        *,
+        n_landmarks: int = 1024,
+        landmark_idx: Optional[np.ndarray] = None,
+        random_state: Optional[int] = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Scalable proximity: return proximity to a subset of landmark points.
+
+        Output is an (n_samples, n_landmarks) matrix P where P[i,j] is the fraction of trees
+        where sample i and landmark j fall into the same leaf.
+
+        This avoids the O(n^2) full proximity matrix.
+
+        Returns:
+          P, landmark_idx
+        """
+        if self._rf is None:
+            raise RuntimeError("call fit() first")
+
+        X = np.asarray(X)
+        n = X.shape[0]
+
+        rng = np.random.default_rng(self.random_state if random_state is None else random_state)
+
+        if landmark_idx is None:
+            m = min(int(n_landmarks), n)
+            landmark_idx = rng.choice(n, size=m, replace=False)
+        else:
+            landmark_idx = np.asarray(landmark_idx, dtype=int)
+            m = landmark_idx.shape[0]
+
+        # leaf ids for all samples and for landmarks
+        leaf_all = self._rf.apply(X)  # (n, T)
+        leaf_lm = leaf_all[landmark_idx, :]  # (m, T)
+        T = leaf_all.shape[1]
+
+        P = np.zeros((n, m), dtype=np.float32)
+
+        # For each tree, group samples by leaf and add to all landmarks in that leaf.
+        for t in range(T):
+            ids = leaf_all[:, t]
+            ids_lm = leaf_lm[:, t]
+
+            # map leaf_id -> landmark positions (0..m-1)
+            lm_map: dict[int, list[int]] = {}
+            for j in range(m):
+                lid = int(ids_lm[j])
+                lm_map.setdefault(lid, []).append(j)
+
+            order = np.argsort(ids)
+            ids_sorted = ids[order]
+            starts = np.r_[0, np.flatnonzero(ids_sorted[1:] != ids_sorted[:-1]) + 1]
+            ends = np.r_[starts[1:], len(ids_sorted)]
+
+            for a, b in zip(starts, ends):
+                lid = int(ids_sorted[a])
+                lm_pos = lm_map.get(lid)
+                if not lm_pos:
+                    continue
+                grp = order[a:b]
+                P[np.ix_(grp, lm_pos)] += 1.0
+
+        P /= float(T)
+        return P, landmark_idx
+
     def cluster(self, proximity: np.ndarray, *, n_clusters: int = 5) -> np.ndarray:
         # Distance for agglomerative
         D = 1.0 - proximity

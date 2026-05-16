@@ -19,4 +19,9 @@ python -m experiments.run_blobs
 python -m experiments.run_iris
 ```
 
+## URF landmarks (scalable proximity)
+```bash
+python -m experiments.run_urf_landmarks
+```
+
 These scripts print best feature subset scores and produce small plots (if matplotlib is installed).

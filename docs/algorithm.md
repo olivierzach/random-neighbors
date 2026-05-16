@@ -27,6 +27,8 @@ For iterations `t = 1..T`:
 - best score and best iteration
 - history dict (per-iteration metadata)
 - optional aggregate feature importance (frequency-weighted by score)
+- optional **stability-selected feature set** from the top-scoring iterations
+- optional **consensus labels** for a subset of points via a co-association matrix
 
 ### Notes
 - Silhouette is biased toward globular clusters and can be undefined for some clusterers.

@@ -157,6 +157,7 @@ class RandomNeighbors:
             n_noise = int((labels == -1).sum())
 
             rec: Dict[str, Any] = {
+                "rows": rows.tolist(),
                 "columns": cols.tolist(),
                 "n_clusters": n_clusters,
                 "n_noise": n_noise,
@@ -210,3 +211,172 @@ class RandomNeighbors:
 
         items = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
         return items[: int(top_k)]
+
+    def stable_features(
+        self,
+        *,
+        top_frac: float = 0.2,
+        min_freq: float = 0.6,
+        top_k: Optional[int] = None,
+        score_weighted: bool = True,
+    ) -> List[int]:
+        """Stability-selection style feature set.
+
+        Procedure:
+        1) Take the top `top_frac` fraction of iterations by score.
+        2) Compute feature selection frequency within those iterations.
+        3) Return features that appear in at least `min_freq` fraction of top iterations.
+
+        If `score_weighted=True`, each iteration contributes weight proportional to `max(score, 0)`.
+
+        Returns a list of feature indices.
+        """
+        if self._last_result is None:
+            raise RuntimeError("call fit() first")
+        if not (0.0 < top_frac <= 1.0):
+            raise ValueError("top_frac must be in (0, 1]")
+        if not (0.0 <= min_freq <= 1.0):
+            raise ValueError("min_freq must be in [0, 1]")
+
+        scored = []
+        for rec in self._last_result.history.values():
+            s = rec.get("score")
+            cols = rec.get("columns")
+            if s is None or cols is None:
+                continue
+            scored.append((float(s), list(cols)))
+
+        if not scored:
+            return []
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        k = max(1, int(round(len(scored) * top_frac)))
+        top = scored[:k]
+
+        # frequency (possibly weighted)
+        num = {}
+        denom = 0.0
+        for s, cols in top:
+            w = max(0.0, s) if score_weighted else 1.0
+            if w == 0.0:
+                continue
+            denom += w
+            for j in cols:
+                num[j] = num.get(j, 0.0) + w
+
+        if denom == 0.0:
+            return []
+
+        freqs = {j: (v / denom) for j, v in num.items()}
+        keep = [j for j, f in freqs.items() if f >= min_freq]
+        keep.sort(key=lambda j: freqs[j], reverse=True)
+
+        if top_k is not None:
+            keep = keep[: int(top_k)]
+
+        return keep
+
+    def consensus_labels(
+        self,
+        *,
+        n_points: int = 1000,
+        top_frac: float = 0.2,
+        n_clusters: int = 5,
+        include_noise: bool = False,
+        random_state: Optional[int] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Consensus clustering on a subset of points using co-association.
+
+        Builds a co-association matrix C where C[a,b] = fraction of selected iterations
+        in which points a and b were both present and assigned to the same cluster.
+
+        Returns:
+          labels: consensus labels for the sampled points (Agglomerative on 1-C)
+          idx: indices of sampled points in the original dataset
+
+        Notes:
+          - This is intentionally subset-based (O(n_points^2)).
+          - Requires that `fit()` stored per-iteration sampled row indices.
+        """
+        if self._last_result is None:
+            raise RuntimeError("call fit() first")
+
+        from sklearn.cluster import AgglomerativeClustering
+
+        # Determine universe size from stored row indices
+        max_row = -1
+        for rec in self._last_result.history.values():
+            rows = rec.get("rows")
+            if rows:
+                max_row = max(max_row, int(np.max(rows)))
+        if max_row < 0:
+            raise RuntimeError("no row history available")
+
+        n_total = max_row + 1
+        rng = np.random.default_rng(self.random_state if random_state is None else random_state)
+        n_points = min(int(n_points), n_total)
+        idx = rng.choice(n_total, size=n_points, replace=False)
+        idx_set = set(idx.tolist())
+
+        # select top iterations
+        scored = []
+        for rec in self._last_result.history.values():
+            s = rec.get("score")
+            if s is None:
+                continue
+            scored.append((float(s), rec))
+        if not scored:
+            raise RuntimeError("no scored iterations")
+        scored.sort(key=lambda x: x[0], reverse=True)
+        k = max(1, int(round(len(scored) * float(top_frac))))
+        chosen = [rec for _, rec in scored[:k]]
+
+        C = np.zeros((n_points, n_points), dtype=np.float32)
+        W = np.zeros((n_points, n_points), dtype=np.float32)
+
+        pos = {int(j): i for i, j in enumerate(idx.tolist())}
+
+        for rec in chosen:
+            rows = rec.get("rows")
+            labels = rec.get("labels")
+            if rows is None or labels is None:
+                continue
+            rows = np.asarray(rows, dtype=int)
+            labels = np.asarray(labels)
+
+            # Keep only rows in idx
+            mask = np.array([r in idx_set for r in rows], dtype=bool)
+            if mask.sum() < 2:
+                continue
+            rr = rows[mask]
+            ll = labels[mask]
+
+            # optionally drop noise
+            if not include_noise:
+                non = ll != -1
+                rr = rr[non]
+                ll = ll[non]
+                if rr.shape[0] < 2:
+                    continue
+
+            # Update denominators for any pair present in this iter
+            ii = np.array([pos[int(r)] for r in rr], dtype=int)
+            W[np.ix_(ii, ii)] += 1.0
+
+            # For each cluster label, add to co-assoc
+            for lab in set(ll.tolist()):
+                if lab == -1 and not include_noise:
+                    continue
+                jj = ii[ll == lab]
+                if jj.size >= 2:
+                    C[np.ix_(jj, jj)] += 1.0
+
+        # normalize
+        with np.errstate(divide="ignore", invalid="ignore"):
+            C = np.where(W > 0, C / W, 0.0)
+        np.fill_diagonal(C, 1.0)
+
+        D = 1.0 - C
+        model = AgglomerativeClustering(n_clusters=int(n_clusters), metric="precomputed", linkage="average")
+        labels_out = model.fit_predict(D)
+        return labels_out, idx
