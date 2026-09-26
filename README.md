@@ -52,10 +52,20 @@ python -m experiments.run_iris
 ```
 
 ## Docs
+- [Benchmark website](https://olivierzach.github.io/random-neighbors/) — saved results, plots, and methodology
 - `docs/algorithm.md` — what the code is doing
 - `docs/related_work.md` — references and keywords
 
 ## Status / TODO
 - Add more principled feature importance (stability selection / permutation)
-- Add benchmark harness + plots
-- Add scalable approximations for URF proximity (n can get big quickly)
+
+## Website
+
+The static benchmark site lives in `docs/site`. Preview it with
+`python3 -m http.server 8000 --directory docs/site` and open `http://localhost:8000`.
+Its plots and results come from `artifacts/benchmarks/20260212_013704/`.
+When updating the snapshot, update both plots, the results table, and the run references together.
+
+GitHub Pages uses GitHub Actions as its publishing source. Changes to the site or
+`.github/workflows/pages.yml` on `master` deploy automatically; the workflow also
+supports manual dispatch.

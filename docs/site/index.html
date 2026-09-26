@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Random Neighbors</title>
+    <meta name="description" content="Random Neighbors feature-selection and clustering benchmarks, compared with K-means and unsupervised random forest landmarks." />
+    <style>
+      * { box-sizing: border-box; }
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0c1118; color: #eef2f6; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: clamp(20px, 5vw, 64px); background: radial-gradient(circle at 25% 12%, rgba(94, 234, 212, .16), transparent 34%), #0c1118; }
+      main { width: min(1080px, 100%); display: grid; gap: 24px; }
+      h1 { margin: 0; font-size: clamp(38px, 7vw, 88px); line-height: .95; letter-spacing: 0; }
+      p { max-width: 760px; margin: 0; color: #a9b4c0; font-size: 18px; line-height: 1.55; }
+      img { width: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,.14); background: #fff; }
+      .meta { color: #7dd3fc; font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: .08em; }
+      h2 { margin: 0; font-size: 28px; }
+      section, header { display: grid; gap: 20px; min-width: 0; }
+      section { margin-top: 24px; }
+      figure { margin: 0; min-width: 0; }
+      img { display: block; height: auto; }
+      figcaption, footer { margin-top: 12px; color: #a9b4c0; line-height: 1.6; }
+      a { color: #7dd3fc; text-underline-offset: 4px; }
+      a:hover { color: #baf5ec; }
+      a:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 5px; }
+      nav { display: flex; flex-wrap: wrap; gap: 20px; }
+      .table-scroll { overflow-x: auto; }
+      table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+      caption { text-align: left; margin-bottom: 12px; color: #a9b4c0; }
+      th, td { padding: 12px; border-bottom: 1px solid #334155; text-align: right; }
+      th:first-child { text-align: left; }
+      footer { padding-top: 24px; border-top: 1px solid #334155; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+      <div class="meta">clustering benchmark · research snapshot</div>
+      <h1>Random Neighbors</h1>
+      <p>Random Neighbors samples rows and features to find feature subsets with good cluster separation. Explore a benchmark snapshot comparing its selected features with K-means and unsupervised random forest (URF) landmarks.</p>
+      <nav aria-label="Project resources">
+        <a href="https://github.com/olivierzach/random-neighbors">Code and installation</a>
+        <a href="https://github.com/olivierzach/random-neighbors/blob/master/docs/algorithm.md">How it works</a>
+        <a href="https://github.com/olivierzach/random-neighbors/blob/master/artifacts/benchmarks/20260212_013704/results.csv">Full benchmark data</a>
+      </nav>
+      </header>
+      <section aria-labelledby="results-title">
+        <h2 id="results-title">Results across five datasets</h2>
+        <p>Adjusted Rand index (ARI) measures agreement with reference labels: 1 means perfect agreement, and values around 0 indicate chance-level agreement. Higher is better. No method wins on every dataset in this run.</p>
+        <figure>
+          <a href="assets/ari-bar.png" aria-label="Open the full-size benchmark chart"><img src="assets/ari-bar.png" width="1920" height="800" alt="ARI comparison across five datasets. Numerical results are in the following table." /></a>
+          <figcaption>K-means and URF use 50 principal components for digits and high-dimensional blobs. Random Neighbors runs K-means on its selected features.</figcaption>
+        </figure>
+        <div class="table-scroll" role="region" aria-label="Benchmark results" tabindex="0">
+          <table>
+            <caption>ARI, rounded to three decimals · seed 0</caption>
+            <thead><tr><th scope="col">Dataset</th><th scope="col">K-means</th><th scope="col">Random Neighbors + K-means</th><th scope="col">URF landmarks + K-means</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Iris</th><td>0.716</td><td>0.758</td><td>0.532</td></tr>
+              <tr><th scope="row">Wine</th><td>0.371</td><td>0.371</td><td>0.782</td></tr>
+              <tr><th scope="row">Digits</th><td>0.653</td><td>0.062</td><td>0.152</td></tr>
+              <tr><th scope="row">Moons</th><td>0.247</td><td>0.458</td><td>0.003</td></tr>
+              <tr><th scope="row">High-dimensional blobs</th><td>1.000</td><td>0.860</td><td>0.312</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section aria-labelledby="moons-title">
+        <h2 id="moons-title">A closer look at moons</h2>
+        <p>On these 2,000 points, Random Neighbors selects one of the two features and improves ARI over the two baselines. It still does not fully recover the curved clusters.</p>
+        <figure>
+          <a href="assets/moons.png" aria-label="Open the full-size moons comparison"><img src="assets/moons.png" width="1920" height="640" alt="Three moons scatter plots: K-means splits diagonally, Random Neighbors splits by the second feature value, and URF assigns most points to one cluster." loading="lazy" /></a>
+          <figcaption>Colors show predicted cluster assignments. Open either chart to inspect it at full size.</figcaption>
+        </figure>
+      </section>
+      <section aria-labelledby="method-title">
+        <h2 id="method-title">About this snapshot</h2>
+        <p>These are the saved results from February 12, 2026 (run 20260212_013704), using one random seed. They illustrate behavior on toy and tabular datasets; they do not establish a general ranking. The number of clusters is set from the known class count, and reference labels are used to evaluate the assignments.</p>
+        <p>Random Neighbors selects features using silhouette scores. Silhouette values computed in different feature spaces are not directly comparable; the table therefore reports ARI. See the <a href="https://github.com/olivierzach/random-neighbors/blob/master/experiments/run_benchmarks.py">benchmark implementation</a> and <a href="https://github.com/olivierzach/random-neighbors/blob/master/experiments/README.md">reproduction instructions</a> for the full setup.</p>
+      </section>
+      <footer>A small research project exploring feature selection and clustering. <a href="https://github.com/olivierzach/random-neighbors">Explore the repository</a>.</footer>
+    </main>
+  </body>
+</html>
